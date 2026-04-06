@@ -34,7 +34,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "agri_data_master.csv")
+DATA_PATH = os.environ.get(
+    "DATA_PATH",
+    os.path.join(os.path.dirname(__file__), "data", "agri_data_master.csv"),
+)
 
 # ---------------------------------------------------------------------------
 # Load data (cached)

@@ -1,7 +1,10 @@
 [server]
 headless = true
 port = 8501
+# Render proxies requests through its edge network; disabling CORS and XSRF
+# protection is the standard configuration for Streamlit apps hosted on Render.
 enableCORS = false
+enableXsrfProtection = false
 
 [theme]
 base = "light"
