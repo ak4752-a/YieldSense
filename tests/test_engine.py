@@ -59,15 +59,15 @@ class TestInterpolateGapPolicy:
         df = pd.DataFrame({"rainfall_mm": s, "temp_c": 0.0, "price_usd": 0.0})
         result = _interpolate_with_gap_policy(df, "rainfall_mm", max_gap=2)
         assert result["rainfall_mm"].isna().sum() == 0
-        assert pytest.approx(result["rainfall_mm"].iloc[1], rel=1e-3) == 2.0
+        assert pytest.approx(result["rainfall_mm"].iloc[1], abs=1e-9) == 2.0
 
     def test_exactly_two_gap_filled(self):
         s = pd.Series([0.0, np.nan, np.nan, 6.0])
         df = pd.DataFrame({"rainfall_mm": s, "temp_c": 0.0, "price_usd": 0.0})
         result = _interpolate_with_gap_policy(df, "rainfall_mm", max_gap=2)
         assert result["rainfall_mm"].isna().sum() == 0
-        assert pytest.approx(result["rainfall_mm"].iloc[1], rel=1e-3) == 2.0
-        assert pytest.approx(result["rainfall_mm"].iloc[2], rel=1e-3) == 4.0
+        assert pytest.approx(result["rainfall_mm"].iloc[1], abs=1e-9) == 2.0
+        assert pytest.approx(result["rainfall_mm"].iloc[2], abs=1e-9) == 4.0
 
     def test_long_gap_rows_dropped(self):
         s = pd.Series([1.0, np.nan, np.nan, np.nan, 5.0])
@@ -285,7 +285,7 @@ class TestDetectAnomalies:
         # Manually inject an extreme value
         subset.at[0, "rainfall_mm"] = 1e6
         result = detect_anomalies(subset)
-        assert result.at[0, "is_shock"] is True or result.at[0, "is_shock"] == True  # noqa: E712
+        assert result.at[0, "is_shock"]
 
     def test_constant_rainfall_no_shock(self):
         subset = _make_subset(60)

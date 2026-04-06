@@ -52,13 +52,13 @@ def load_data() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Computing global sensitivity index …")
-def get_summary(df_hash: int, _df: pd.DataFrame) -> pd.DataFrame:  # noqa: ARG001
+def get_summary(_df: pd.DataFrame) -> pd.DataFrame:
     return build_summary_report(_df)
 
 
 df = load_data()
 # We pass a hash so cache is invalidated if df changes
-summary_df = get_summary(hash(df.to_json()), df)
+summary_df = get_summary(df)
 
 # ---------------------------------------------------------------------------
 # Sidebar controls
