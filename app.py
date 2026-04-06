@@ -15,12 +15,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.engine import (
+    REQUIRED_COLUMNS,
     build_summary_report,
     cap_outliers,
     compute_sensitivity_index,
     detect_anomalies,
     get_subset,
     load_and_clean_data,
+    load_and_clean_uploaded_csv,
     min_max_normalize,
 )
 
@@ -40,7 +42,7 @@ DATA_PATH = os.environ.get(
 )
 
 # ---------------------------------------------------------------------------
-# Load data (cached)
+# Cached data-loading helpers
 # ---------------------------------------------------------------------------
 
 @st.cache_data(show_spinner="Loading & cleaning data …")
@@ -48,28 +50,133 @@ def load_data() -> pd.DataFrame:
     if not os.path.exists(DATA_PATH):
         st.error(
             f"CSV not found at **{DATA_PATH}**.  "
-            "Please place `agri_data_master.csv` in the `/data` folder and restart."
+            "Please place `agri_data_master.csv` in the `data/` folder and restart.  "
+            "You can also upload a CSV directly in the sidebar."
         )
         st.stop()
     return load_and_clean_data(DATA_PATH)
 
 
+@st.cache_data(show_spinner="Parsing & cleaning uploaded CSV …")
+def load_uploaded_data(file_bytes: bytes) -> tuple[pd.DataFrame | None, list[str]]:
+    """Parse and clean an uploaded CSV (bytes). Cached by content hash."""
+    return load_and_clean_uploaded_csv(io.BytesIO(file_bytes))
+
+
 @st.cache_data(show_spinner="Computing global sensitivity index …")
-def get_summary(_df: pd.DataFrame) -> pd.DataFrame:
-    return build_summary_report(_df)
+def get_summary(df: pd.DataFrame) -> pd.DataFrame:
+    return build_summary_report(df)
 
-
-df = load_data()
-# We pass a hash so cache is invalidated if df changes
-summary_df = get_summary(df)
 
 # ---------------------------------------------------------------------------
-# Sidebar controls
+# Template CSV for download
+# ---------------------------------------------------------------------------
+
+_TEMPLATE_CSV = (
+    "yyyy_mm,country,crop,rainfall_mm,temp_c,price_usd\n"
+    "2024-01,India,Rice,15.2,22.4,450.50\n"
+    "2024-01,Brazil,Maize,120.5,26.1,210.20\n"
+    "2024-01,USA,Wheat,45.3,5.2,240.10\n"
+    "2024-02,India,Rice,18.1,23.0,450.50\n"
+    "2024-02,Brazil,Maize,115.0,25.8,210.20\n"
+    "2024-02,USA,Wheat,38.7,6.1,240.10\n"
+)
+
+# ---------------------------------------------------------------------------
+# Sidebar – branding & upload
 # ---------------------------------------------------------------------------
 st.sidebar.title("🌾 YieldSense")
 st.sidebar.markdown("Climate-Driven Food Security Dashboard")
 st.sidebar.divider()
 
+# ── CSV upload ──────────────────────────────────────────────────────────────
+st.sidebar.subheader("📂 Data Source")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload master CSV (optional)",
+    type=["csv"],
+    help=(
+        "Upload your own master CSV to override the built-in dataset for this "
+        "session.  The file is used in-memory only — nothing is saved to disk."
+    ),
+)
+
+st.sidebar.download_button(
+    label="⬇️ Download template CSV",
+    data=_TEMPLATE_CSV,
+    file_name="yieldsense_template.csv",
+    mime="text/csv",
+    help="Download a minimal example CSV showing the required format.",
+)
+
+# ── Data format / instructions expander ─────────────────────────────────────
+with st.sidebar.expander("ℹ️ Data format / Upload instructions"):
+    st.markdown(
+        f"""
+**Required columns** (exact names):
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `yyyy_mm` | string | Month in `YYYY-MM` format, e.g. `2024-01` |
+| `country` | string | Country name, e.g. `India`, `USA` |
+| `crop` | string | Crop name, e.g. `Wheat`, `Rice`, `Maize`, `Soybeans` |
+| `rainfall_mm` | float | Monthly cumulative rainfall (mm) |
+| `temp_c` | float | Mean monthly temperature (°C) |
+| `price_usd` | float | Global commodity price (USD / metric tonne) |
+
+**Example rows:**
+```
+{", ".join(REQUIRED_COLUMNS)}
+2024-01,India,Rice,15.2,22.4,450.50
+2024-01,Brazil,Maize,120.5,26.1,210.20
+```
+
+**Note on `price_usd`:** this is a *global reference price* for the
+crop-month combination (e.g. from the World Bank Pink Sheet).  It is
+the same value for every country in the same crop-month row.
+
+**Suggested data sources:**
+- **Prices** – [World Bank Pink Sheet](https://www.worldbank.org/en/research/commodity-markets)
+  (monthly commodity prices, free download)
+- **Climate** – [World Bank Climate Knowledge Portal](https://climateknowledgeportal.worldbank.org/)
+  (monthly rainfall + temperature by country, free)
+
+Merge the two sources on `yyyy_mm` + `crop` to produce the master CSV.
+"""
+    )
+
+st.sidebar.divider()
+
+# ---------------------------------------------------------------------------
+# Load data (upload takes priority over local CSV)
+# ---------------------------------------------------------------------------
+if uploaded_file is not None:
+    file_bytes = uploaded_file.getvalue()
+    result_df, messages = load_uploaded_data(file_bytes)
+
+    if result_df is None:
+        # Fatal validation errors
+        for msg in messages:
+            st.sidebar.error(msg)
+        st.error(
+            "The uploaded CSV could not be loaded.  "
+            "See the sidebar for details and refer to the **Data format / Upload "
+            "instructions** section for the required schema."
+        )
+        st.stop()
+
+    for msg in messages:
+        st.sidebar.warning(msg)
+
+    df = result_df
+    st.sidebar.success("✅ Using uploaded CSV for this session.")
+else:
+    df = load_data()
+
+summary_df = get_summary(df)
+
+# ---------------------------------------------------------------------------
+# Sidebar – country / crop selectors (need df to be loaded first)
+# ---------------------------------------------------------------------------
 countries = sorted(df["country"].unique().tolist())
 crops = sorted(df["crop"].unique().tolist())
 

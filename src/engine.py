@@ -12,10 +12,25 @@ Implemented by:          corr( rainfall,      price.shift(-lag) )
 
 from __future__ import annotations
 
+import io
+
 import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 
+# ---------------------------------------------------------------------------
+# Schema contract
+# ---------------------------------------------------------------------------
+
+#: Columns that every master CSV (local or uploaded) must contain.
+REQUIRED_COLUMNS: list[str] = [
+    "yyyy_mm",
+    "country",
+    "crop",
+    "rainfall_mm",
+    "temp_c",
+    "price_usd",
+]
 
 # ---------------------------------------------------------------------------
 # Data loading & cleaning
@@ -55,6 +70,86 @@ def load_and_clean_data(filepath: str = "data/agri_data_master.csv") -> pd.DataF
 
     result = pd.concat(cleaned_groups, ignore_index=True)
     return result.sort_values("yyyy_mm").reset_index(drop=True)
+
+
+def load_and_clean_uploaded_csv(
+    file_obj: io.IOBase,
+) -> tuple[pd.DataFrame | None, list[str]]:
+    """Read, validate, parse, and clean an uploaded CSV file-like object.
+
+    Applies the same missing-value policy as :func:`load_and_clean_data`:
+
+    - Gaps of **<= 2 consecutive months** are filled by linear interpolation.
+    - Gaps of **> 2 consecutive months** are dropped.
+
+    Parameters
+    ----------
+    file_obj:
+        Any file-like object accepted by :func:`pandas.read_csv` (e.g. an
+        ``io.BytesIO`` or an :class:`streamlit.runtime.uploaded_file_manager.UploadedFile`).
+
+    Returns
+    -------
+    (cleaned_df, messages)
+        *cleaned_df* is ``None`` when a fatal error prevents parsing;
+        *messages* is a list of human-readable error / warning strings
+        (empty on full success, non-empty but *df* not ``None`` for warnings).
+    """
+    messages: list[str] = []
+
+    # ── Read ────────────────────────────────────────────────────────────────
+    try:
+        df = pd.read_csv(file_obj)
+    except Exception as exc:  # noqa: BLE001
+        return None, [f"Could not read CSV: {exc}"]
+
+    # ── Required columns ────────────────────────────────────────────────────
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        return None, [
+            f"Missing required column(s): **{', '.join(missing)}**.  "
+            f"The CSV must contain: {', '.join(REQUIRED_COLUMNS)}."
+        ]
+
+    # ── Type coercion ───────────────────────────────────────────────────────
+    df["country"] = df["country"].astype(str).str.strip()
+    df["crop"] = df["crop"].astype(str).str.strip()
+
+    numeric_cols = ["rainfall_mm", "temp_c", "price_usd"]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # ── Parse yyyy_mm ────────────────────────────────────────────────────────
+    parsed = pd.to_datetime(df["yyyy_mm"], format="%Y-%m", errors="coerce")
+    unparseable = parsed.isna().sum()
+    if unparseable == len(df):
+        return None, [
+            "Could not parse any 'yyyy_mm' values.  "
+            "Expected format: YYYY-MM (e.g. 2024-01)."
+        ]
+    if unparseable > 0:
+        messages.append(
+            f"{unparseable} row(s) had unparseable 'yyyy_mm' values and were dropped."
+        )
+    df["yyyy_mm"] = parsed
+    df = df.dropna(subset=["yyyy_mm"]).reset_index(drop=True)
+    df = df.sort_values("yyyy_mm").reset_index(drop=True)
+
+    # ── Apply grouped cleaning (same policy as load_and_clean_data) ──────────
+    cleaned_groups: list[pd.DataFrame] = []
+    for (country, crop), grp in df.groupby(["country", "crop"], sort=False):
+        grp = grp.sort_values("yyyy_mm").copy()
+        for col in numeric_cols:
+            if grp[col].isna().any():
+                grp = _interpolate_with_gap_policy(grp, col, max_gap=2)
+        cleaned_groups.append(grp)
+
+    if not cleaned_groups:
+        return None, ["No valid data rows remain after parsing and cleaning."]
+
+    result = pd.concat(cleaned_groups, ignore_index=True)
+    result = result.sort_values("yyyy_mm").reset_index(drop=True)
+    return result, messages
 
 
 def _interpolate_with_gap_policy(

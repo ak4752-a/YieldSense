@@ -12,6 +12,7 @@
 - **Interactive choropleth map** – compare sensitivity across all countries for a selected crop.
 - **Dual-axis time-series chart** – rainfall bars (red = shock) overlaid with commodity price line.
 - **Min–max normalised trends** – visual alignment of rainfall and price on a common [0, 1] scale.
+- **CSV upload override** – upload your own master CSV in the sidebar to replace the built-in data for the current session (no database, no disk write).
 - **Downloadable summary CSV** – one-click export of the full sensitivity report.
 
 ---
@@ -53,6 +54,55 @@ Place a CSV at `data/agri_data_master.csv` with the following columns:
 Missing-value policy (applied per country/crop group):
 - Gaps of **≤ 2 consecutive months** are filled by linear interpolation.
 - Gaps of **> 2 consecutive months** are dropped entirely.
+
+---
+
+## CSV Upload (optional override)
+
+The sidebar contains an **Upload master CSV** control.  Uploading a CSV
+replaces the built-in dataset for the current browser session only — nothing
+is written to disk, and no database is used.
+
+### Schema contract
+
+The uploaded file must contain exactly the same columns as described in the
+**Data Format** table above (column names must match exactly).
+
+**Example rows:**
+
+```
+yyyy_mm,country,crop,rainfall_mm,temp_c,price_usd
+2024-01,India,Rice,15.2,22.4,450.50
+2024-01,Brazil,Maize,120.5,26.1,210.20
+2024-01,USA,Wheat,45.3,5.2,240.10
+```
+
+**Note on `price_usd`:** this is a *global reference price* for the
+crop-month combination.  The same price applies to every country for the
+same crop in the same month (e.g. the world market price for Rice in
+January 2024 is 450.50 USD/t regardless of country).
+
+### Validation rules
+
+| Check | Behaviour on failure |
+|-------|----------------------|
+| Required columns present | Error listing missing column names; file rejected |
+| `yyyy_mm` parseable as `YYYY-MM` | Unparseable rows dropped with a warning; file rejected if all rows fail |
+| `rainfall_mm`, `temp_c`, `price_usd` numeric | Non-numeric values coerced to NaN and handled by the interpolation policy |
+| `country`, `crop` | Treated as strings; leading/trailing whitespace stripped |
+
+### Suggested data sources
+
+| Data | Source | Notes |
+|------|--------|-------|
+| Commodity prices (`price_usd`) | [World Bank Pink Sheet](https://www.worldbank.org/en/research/commodity-markets) | Free monthly download; select the crop of interest |
+| Rainfall + temperature (`rainfall_mm`, `temp_c`) | [World Bank Climate Knowledge Portal](https://climateknowledgeportal.worldbank.org/) | Monthly data by country; free |
+
+Merge the two sources on `yyyy_mm` + `crop` (and optionally `country` for
+climate data) to produce the master CSV.
+
+A **Download template CSV** button in the sidebar provides a minimal
+example file showing the required format.
 
 ---
 
