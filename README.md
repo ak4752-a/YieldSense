@@ -21,6 +21,7 @@
 ```
 YieldSense/
 ├── app.py                  # Streamlit dashboard
+├── render.yaml             # Render Blueprint (deployment config)
 ├── requirements.txt        # Python dependencies
 ├── data/
 │   └── agri_data_master.csv  # Monthly agri data (2000–2024)
@@ -97,14 +98,27 @@ All 29 tests should pass.
 
 ## Deployment
 
-### Streamlit Community Cloud (recommended – free)
+### Render (recommended)
 
-1. Push your repository to GitHub (including the `data/` folder).
-2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
-3. Click **New app** → select the repo → set **Main file path** to `app.py`.
-4. Click **Deploy**. The app will be live in under a minute.
+The repository includes a `render.yaml` Blueprint, so deployment is one click:
 
-> The `.streamlit/config.toml` file is committed and will be picked up automatically.
+1. Fork or push the repository to your GitHub account (including the `data/` folder with `agri_data_master.csv`).
+2. Go to [render.com](https://render.com) and sign in / create an account.
+3. Click **New → Blueprint** and connect your GitHub repository.
+4. Render will detect `render.yaml` automatically and create the **yieldsense** web service.
+5. Click **Apply** — Render installs dependencies and starts the app.
+
+**Manual setup (without Blueprint):**
+
+1. Click **New → Web Service** and connect the GitHub repo.
+2. Branch: `main`.
+3. Build command: `pip install -r requirements.txt`
+4. Start command: `streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true`
+5. Click **Create Web Service**.
+
+**Environment variables:** no environment variables are required. The app reads `data/agri_data_master.csv` from the repository using a relative path. If you need to supply the data file from an external location (e.g. a Render persistent disk), set the `DATA_PATH` environment variable to the absolute path of the CSV.
+
+**Data file:** `data/agri_data_master.csv` is committed to the repository and will be available on Render automatically. If the file is not committed, attach a [Render persistent disk](https://render.com/docs/disks) at a mount path (e.g. `/data`) and set `DATA_PATH=/data/agri_data_master.csv` in the service's environment variables.
 
 ### Docker
 
@@ -127,13 +141,12 @@ EXPOSE 8501
 CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0"]
 ```
 
-### Other PaaS (Heroku, Render, Railway)
+### Streamlit Community Cloud
 
-Add a `Procfile`:
-
-```
-web: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
-```
+1. Push your repository to GitHub (including the `data/` folder).
+2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
+3. Click **New app** → select the repo → set **Main file path** to `app.py`.
+4. Click **Deploy**. The app will be live in under a minute.
 
 ---
 
