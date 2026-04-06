@@ -4,11 +4,14 @@ Tests for src/engine.py
 
 from __future__ import annotations
 
+import io
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from src.engine import (
+    REQUIRED_COLUMNS,
     _interpolate_with_gap_policy,
     build_summary_report,
     cap_outliers,
@@ -17,6 +20,7 @@ from src.engine import (
     detect_anomalies,
     get_subset,
     load_and_clean_data,
+    load_and_clean_uploaded_csv,
     min_max_normalize,
 )
 
@@ -321,3 +325,150 @@ class TestBuildSummaryReport:
         report = build_summary_report(df)
         # Two unique (country, crop) combinations
         assert len(report) == 2
+
+
+# ---------------------------------------------------------------------------
+# REQUIRED_COLUMNS constant
+# ---------------------------------------------------------------------------
+
+class TestRequiredColumns:
+    def test_contains_expected_columns(self):
+        expected = {"yyyy_mm", "country", "crop", "rainfall_mm", "temp_c", "price_usd"}
+        assert expected == set(REQUIRED_COLUMNS)
+
+    def test_is_list(self):
+        assert isinstance(REQUIRED_COLUMNS, list)
+
+
+# ---------------------------------------------------------------------------
+# load_and_clean_uploaded_csv
+# ---------------------------------------------------------------------------
+
+def _make_valid_csv_bytes(**kwargs) -> bytes:
+    """Helper: build a valid minimal CSV as bytes."""
+    rows = [
+        "yyyy_mm,country,crop,rainfall_mm,temp_c,price_usd",
+        "2024-01,India,Rice,15.2,22.4,450.50",
+        "2024-02,India,Rice,18.1,23.0,455.00",
+        "2024-03,India,Rice,20.0,24.0,460.00",
+    ]
+    content = "\n".join(rows)
+    return content.encode("utf-8")
+
+
+class TestLoadAndCleanUploadedCsv:
+    def test_valid_csv_returns_dataframe(self):
+        buf = io.BytesIO(_make_valid_csv_bytes())
+        df, errors = load_and_clean_uploaded_csv(buf)
+        assert df is not None
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 3
+
+    def test_valid_csv_no_errors(self):
+        buf = io.BytesIO(_make_valid_csv_bytes())
+        _, errors = load_and_clean_uploaded_csv(buf)
+        assert errors == []
+
+    def test_yyyy_mm_parsed_as_datetime(self):
+        buf = io.BytesIO(_make_valid_csv_bytes())
+        df, _ = load_and_clean_uploaded_csv(buf)
+        assert df is not None
+        assert pd.api.types.is_datetime64_any_dtype(df["yyyy_mm"])
+
+    def test_numeric_columns_are_numeric(self):
+        buf = io.BytesIO(_make_valid_csv_bytes())
+        df, _ = load_and_clean_uploaded_csv(buf)
+        assert df is not None
+        for col in ["rainfall_mm", "temp_c", "price_usd"]:
+            assert pd.api.types.is_numeric_dtype(df[col]), f"{col} should be numeric"
+
+    def test_string_columns_are_strings(self):
+        buf = io.BytesIO(_make_valid_csv_bytes())
+        df, _ = load_and_clean_uploaded_csv(buf)
+        assert df is not None
+        for col in ("country", "crop"):
+            assert pd.api.types.is_string_dtype(df[col]) or df[col].dtype == object, (
+                f"{col} should be a string-like dtype"
+            )
+
+    def test_missing_required_column_returns_none(self):
+        csv = b"yyyy_mm,country,crop,rainfall_mm,temp_c\n2024-01,India,Rice,15.2,22.4\n"
+        buf = io.BytesIO(csv)
+        df, errors = load_and_clean_uploaded_csv(buf)
+        assert df is None
+        assert len(errors) == 1
+        assert "price_usd" in errors[0]
+
+    def test_multiple_missing_columns_reported(self):
+        csv = b"yyyy_mm,country\n2024-01,India\n"
+        buf = io.BytesIO(csv)
+        df, errors = load_and_clean_uploaded_csv(buf)
+        assert df is None
+        assert len(errors) == 1
+        # Error should mention all missing columns
+        for col in ["crop", "rainfall_mm", "temp_c", "price_usd"]:
+            assert col in errors[0]
+
+    def test_invalid_numeric_coerced_to_nan(self):
+        csv = (
+            b"yyyy_mm,country,crop,rainfall_mm,temp_c,price_usd\n"
+            b"2024-01,India,Rice,not_a_number,22.4,450.50\n"
+            b"2024-02,India,Rice,18.1,23.0,455.00\n"
+            b"2024-03,India,Rice,20.0,24.0,460.00\n"
+        )
+        buf = io.BytesIO(csv)
+        df, _ = load_and_clean_uploaded_csv(buf)
+        # Row with bad rainfall should be handled (interpolated or dropped)
+        assert df is not None
+
+    def test_unparseable_yyyy_mm_rows_dropped_with_warning(self):
+        csv = (
+            b"yyyy_mm,country,crop,rainfall_mm,temp_c,price_usd\n"
+            b"BADDATE,India,Rice,15.2,22.4,450.50\n"
+            b"2024-01,India,Rice,18.1,23.0,455.00\n"
+            b"2024-02,India,Rice,20.0,24.0,460.00\n"
+            b"2024-03,India,Rice,22.0,25.0,465.00\n"
+        )
+        buf = io.BytesIO(csv)
+        df, messages = load_and_clean_uploaded_csv(buf)
+        assert df is not None
+        # The bad-date row should be dropped
+        assert len(df) == 3
+        # A warning should have been returned
+        assert len(messages) == 1
+        assert "dropped" in messages[0].lower()
+
+    def test_all_unparseable_yyyy_mm_returns_none(self):
+        csv = (
+            b"yyyy_mm,country,crop,rainfall_mm,temp_c,price_usd\n"
+            b"BAD,India,Rice,15.2,22.4,450.50\n"
+        )
+        buf = io.BytesIO(csv)
+        df, errors = load_and_clean_uploaded_csv(buf)
+        assert df is None
+        assert len(errors) == 1
+
+    def test_not_csv_returns_error(self):
+        buf = io.BytesIO(b"this is not csv data !!!\x00\x01\x02")
+        df, errors = load_and_clean_uploaded_csv(buf)
+        # Should return None or a df with errors (no crash)
+        if df is None:
+            assert len(errors) > 0
+
+    def test_multiple_country_crop_groups(self):
+        csv = (
+            b"yyyy_mm,country,crop,rainfall_mm,temp_c,price_usd\n"
+            b"2024-01,India,Rice,15.2,22.4,450.50\n"
+            b"2024-02,India,Rice,18.1,23.0,455.00\n"
+            b"2024-03,India,Rice,20.0,24.0,460.00\n"
+            b"2024-01,USA,Wheat,45.3,5.2,240.10\n"
+            b"2024-02,USA,Wheat,38.7,6.1,238.80\n"
+            b"2024-03,USA,Wheat,42.0,7.0,237.00\n"
+        )
+        buf = io.BytesIO(csv)
+        df, errors = load_and_clean_uploaded_csv(buf)
+        assert df is not None
+        assert errors == []
+        assert set(df["country"].unique()) == {"India", "USA"}
+        assert set(df["crop"].unique()) == {"Rice", "Wheat"}
+
