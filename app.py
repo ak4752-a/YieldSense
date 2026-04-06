@@ -7,7 +7,7 @@ Run with:  streamlit run app.py
 from __future__ import annotations
 
 import io
-import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -34,7 +34,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "agri_data_master.csv")
+DATA_PATH = Path(__file__).parent / "data" / "agri_data_master.csv"
 
 # ---------------------------------------------------------------------------
 # Load data (cached)
@@ -42,13 +42,13 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "agri_data_master.cs
 
 @st.cache_data(show_spinner="Loading & cleaning data …")
 def load_data() -> pd.DataFrame:
-    if not os.path.exists(DATA_PATH):
+    if not DATA_PATH.exists():
         st.error(
             f"CSV not found at **{DATA_PATH}**.  "
             "Please place `agri_data_master.csv` in the `/data` folder and restart."
         )
         st.stop()
-    return load_and_clean_data(DATA_PATH)
+    return load_and_clean_data(str(DATA_PATH))
 
 
 @st.cache_data(show_spinner="Computing global sensitivity index …")

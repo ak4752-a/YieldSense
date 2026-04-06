@@ -99,12 +99,16 @@ All 29 tests should pass.
 
 ### Streamlit Community Cloud (recommended – free)
 
-1. Push your repository to GitHub (including the `data/` folder).
+1. Ensure `data/agri_data_master.csv` is committed (it is tracked by default in this repo).
 2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
-3. Click **New app** → select the repo → set **Main file path** to `app.py`.
+3. Click **New app** and fill in:
+   - **Repository:** `ak4752-a/YieldSense`
+   - **Branch:** `main`
+   - **Main file path:** `app.py`
 4. Click **Deploy**. The app will be live in under a minute.
 
 > The `.streamlit/config.toml` file is committed and will be picked up automatically.
+> No secrets or environment variables are required.
 
 ### Docker
 
